@@ -28,7 +28,7 @@ app.post("/webhook", async (req: Request, res: Response) => {
   }
 
   const action = data.action.toLowerCase();
-  const symbol = data.pair;
+  const [exchange, symbol] = data.pair.split(":");
   const quantity = data.quantity || 0.001;
 
   if (!["buy", "sell"].includes(action)) {
