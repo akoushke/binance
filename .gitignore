@@ -1,0 +1,31 @@
+# Node modules (dependencies)
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# dotenv environment files (secret keys)
+.env
+.env.local
+.env.*.local
+
+# TypeScript build output
+dist/
+build/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# macOS specific
+*.DS_Store
+
+# Replit or Glitch configs (if applicable)
+.replit
+*.swp
