@@ -8,7 +8,8 @@ import {
   API_KEY,
   CHAIN_ID,
 } from "../../configs/wallets/metamask";
-import {TOKEN_ADDRESS_MAP} from "../../utils/tokens"; // 🧠 Centralized token registry
+import {TOKEN_ADDRESS_MAP} from "../../utils/tokens";
+import {toWei} from "../../utils/toWei";
 
 const router = Router();
 
@@ -21,15 +22,17 @@ router.get("/balances", async (_req: Request, res: Response) => {
   const nativeSymbol = "ETH";
 
   try {
-    // 🔹 Native token balance
+    console.log(`📡 Fetching balances for wallet: ${WALLET_ADDRESS}`);
+
+    // Native ETH
     const nativeBalance = await provider.getBalance(WALLET_ADDRESS);
     balances[nativeSymbol] = ethers.formatEther(nativeBalance);
+    console.log(`💰 ${nativeSymbol}: ${balances[nativeSymbol]}`);
 
-    // 🔹 ERC-20 token balances
+    // ERC-20 balances
     const erc20Abi = [
       "function balanceOf(address account) view returns (uint256)",
       "function decimals() view returns (uint8)",
-      "function symbol() view returns (string)",
     ];
 
     for (const [symbol, address] of Object.entries(TOKEN_ADDRESS_MAP)) {
@@ -42,12 +45,12 @@ router.get("/balances", async (_req: Request, res: Response) => {
           token.decimals(),
         ]);
 
-        balances[symbol] = ethers.formatUnits(rawBalance, decimals);
+        const formatted = ethers.formatUnits(rawBalance, decimals);
+        balances[symbol] = formatted;
+        console.log(`💰 ${symbol}: ${formatted}`);
       } catch (err) {
-        console.warn(
-          `⚠️ Failed to get balance for ${symbol}:`,
-          (err as Error).message
-        );
+        const errorMsg = (err as Error).message;
+        console.warn(`⚠️ Failed to fetch balance for ${symbol}: ${errorMsg}`);
         balances[symbol] = "Error";
       }
     }
@@ -75,7 +78,8 @@ router.get("/balances", async (_req: Request, res: Response) => {
 router.post("/webhook", async (req: Request, res: Response) => {
   const {from, to, amount} = req.body;
 
-  // ✅ Basic validation
+  console.log("📨 Swap request received:", {from, to, amount});
+
   if (!from || !to || !amount) {
     return res.status(400).json({
       success: false,
@@ -90,6 +94,9 @@ router.post("/webhook", async (req: Request, res: Response) => {
   const toToken = TOKEN_ADDRESS_MAP[toSymbol];
 
   if (!fromToken || !toToken) {
+    console.warn(
+      `❌ Unsupported token(s): from='${fromSymbol}', to='${toSymbol}'`
+    );
     return res.status(400).json({
       success: false,
       message: `Unsupported token symbol(s): from='${fromSymbol}', to='${toSymbol}'`,
@@ -97,10 +104,13 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 
   try {
+    const amountWei = await toWei(String(amount), fromToken, provider);
+    console.log(`🔢 Converted ${amount} ${fromSymbol} → ${amountWei} wei`);
+
     const txHash = await performTokenSwap(
       fromToken,
       toToken,
-      String(amount),
+      amountWei,
       provider,
       wallet,
       WALLET_ADDRESS,

@@ -47,7 +47,9 @@ async function checkAllowance(
     tokenAddress,
     walletAddress,
   });
+  console.log(`🔍 Checking allowance: ${url}`);
   const res = await axios.get(url, {headers: buildHeaders(apiKey)});
+  console.log(`📊 Allowance returned: ${res.data.allowance}`);
   return res.data.allowance;
 }
 
@@ -67,6 +69,7 @@ async function buildApprovalTx(
     "/approve/transaction",
     amount ? {tokenAddress, amount} : {tokenAddress}
   );
+  console.log(`📝 Fetching approval transaction: ${url}`);
   const res = await axios.get(url, {headers: buildHeaders(apiKey)});
 
   const gas = await provider.estimateGas({
@@ -75,6 +78,8 @@ async function buildApprovalTx(
     from: walletAddress,
     value: ethers.toBigInt(res.data.value),
   });
+
+  console.log(`⛽ Estimated gas for approval: ${gas.toString()}`);
 
   return {...res.data, gas: Number(gas)};
 }
@@ -88,7 +93,9 @@ async function buildSwapTx(
   swapParams: Record<string, any>
 ): Promise<TxObject> {
   const url = buildApiRequestUrl(chainId, "/swap", swapParams);
+  console.log(`🔁 Building swap TX: ${url}`);
   const res = await axios.get(url, {headers: buildHeaders(apiKey)});
+  console.log(`📦 Swap TX payload received.`);
   return res.data.tx;
 }
 
@@ -99,6 +106,7 @@ async function signAndSendTransaction(
   wallet: ethers.Wallet,
   tx: TxObject
 ): Promise<string> {
+  console.log(`🚀 Sending transaction to: ${tx.to}`);
   const txResponse = await wallet.sendTransaction({
     to: tx.to,
     data: tx.data,
@@ -107,15 +115,17 @@ async function signAndSendTransaction(
     gasPrice: tx.gasPrice ? ethers.toBigInt(tx.gasPrice) : undefined,
   });
 
+  console.log(`📡 Waiting for transaction confirmation...`);
   await txResponse.wait(); // wait for 1 confirmation
+  console.log(`✅ Transaction confirmed: ${txResponse.hash}`);
   return txResponse.hash;
 }
 
 /**
  * Performs a token swap using 1inch API
- * @param fromSymbol - Token you're selling
- * @param toSymbol - Token you're buying
- * @param amount - Human-readable amount (e.g. "0.1")
+ * @param fromToken - Token contract address you're selling
+ * @param toToken - Token contract address you're buying
+ * @param amountWei - Amount in base units (wei)
  * @param provider - Ethers provider instance
  * @param wallet - Ethers wallet instance
  * @param walletAddress - Your wallet address
@@ -126,14 +136,16 @@ async function signAndSendTransaction(
 export async function performTokenSwap(
   fromToken: string,
   toToken: string,
-  amount: string,
+  amountWei: string,
   provider: JsonRpcProvider,
   wallet: ethers.Wallet,
   walletAddress: string,
   apiKey: string,
   chainId: number
 ): Promise<string> {
-  const amountWei = parseUnits(amount, 18).toString();
+  console.log(
+    `💰 Starting token swap: ${fromToken} → ${toToken} | Amount (wei): ${amountWei}`
+  );
 
   const swapParams = {
     src: fromToken,
@@ -154,15 +166,19 @@ export async function performTokenSwap(
   );
 
   if (BigInt(allowance) < BigInt(amountWei)) {
+    console.log(`⚠️ Insufficient allowance. Approval required.`);
     const approvalTx = await buildApprovalTx(
       provider,
       chainId,
       apiKey,
       walletAddress,
-      fromToken
+      fromToken,
+      amountWei
     );
     const approvalHash = await signAndSendTransaction(wallet, approvalTx);
     console.log(`✅ Approval TX hash: ${approvalHash}`);
+  } else {
+    console.log(`👍 Sufficient allowance. No approval needed.`);
   }
 
   const swapTx = await buildSwapTx(chainId, apiKey, swapParams);
