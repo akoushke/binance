@@ -1,7 +1,17 @@
 import axios from "axios";
 import {ethers, parseUnits} from "ethers";
 import type {JsonRpcProvider} from "ethers";
+import {log} from "../utils/logger";
 
+/**
+ * @typedef {Object} TxObject
+ * @property {string} from - Sender address
+ * @property {string} to - Receiver address
+ * @property {string} data - Encoded function call
+ * @property {string} value - Amount of ETH to send (in wei)
+ * @property {number} gas - Estimated gas limit
+ * @property {string} [gasPrice] - Optional gas price
+ */
 type TxObject = {
   from: string;
   to: string;
@@ -12,7 +22,11 @@ type TxObject = {
 };
 
 /**
- * Builds full request URL with query params
+ * Builds full request URL with query parameters.
+ * @param {number} chainId - Blockchain chain ID.
+ * @param {string} endpoint - 1inch API endpoint.
+ * @param {Record<string, any>} params - Query parameters.
+ * @returns {string} Full API URL.
  */
 function buildApiRequestUrl(
   chainId: number,
@@ -24,7 +38,9 @@ function buildApiRequestUrl(
 }
 
 /**
- * Builds the headers for 1inch API
+ * Builds the headers for 1inch API.
+ * @param {string} apiKey - 1inch API key.
+ * @returns {Record<string, string>} HTTP headers.
  */
 function buildHeaders(apiKey: string) {
   return {
@@ -34,7 +50,13 @@ function buildHeaders(apiKey: string) {
 }
 
 /**
- * Checks current token allowance
+ * Checks current token allowance for a wallet.
+ * @param {JsonRpcProvider} provider - Ethers provider instance.
+ * @param {number} chainId - Blockchain chain ID.
+ * @param {string} apiKey - 1inch API key.
+ * @param {string} tokenAddress - ERC20 token address.
+ * @param {string} walletAddress - Wallet address.
+ * @returns {Promise<string>} Allowance in wei.
  */
 async function checkAllowance(
   provider: JsonRpcProvider,
@@ -47,14 +69,21 @@ async function checkAllowance(
     tokenAddress,
     walletAddress,
   });
-  console.log(`🔍 Checking allowance: ${url}`);
+  log("INFO", `🔍 Checking allowance: ${url}`);
   const res = await axios.get(url, {headers: buildHeaders(apiKey)});
-  console.log(`📊 Allowance returned: ${res.data.allowance}`);
+  log("INFO", `📊 Allowance returned: ${res.data.allowance}`);
   return res.data.allowance;
 }
 
 /**
- * Builds the approval transaction
+ * Builds an approval transaction object.
+ * @param {JsonRpcProvider} provider - Ethers provider instance.
+ * @param {number} chainId - Blockchain chain ID.
+ * @param {string} apiKey - 1inch API key.
+ * @param {string} walletAddress - Wallet address.
+ * @param {string} tokenAddress - Token to approve.
+ * @param {string} [amount] - Optional amount to approve.
+ * @returns {Promise<TxObject>} Transaction object.
  */
 async function buildApprovalTx(
   provider: JsonRpcProvider,
@@ -69,7 +98,7 @@ async function buildApprovalTx(
     "/approve/transaction",
     amount ? {tokenAddress, amount} : {tokenAddress}
   );
-  console.log(`📝 Fetching approval transaction: ${url}`);
+  log("INFO", `📝 Fetching approval transaction: ${url}`);
   const res = await axios.get(url, {headers: buildHeaders(apiKey)});
 
   const gas = await provider.estimateGas({
@@ -79,13 +108,17 @@ async function buildApprovalTx(
     value: ethers.toBigInt(res.data.value),
   });
 
-  console.log(`⛽ Estimated gas for approval: ${gas.toString()}`);
+  log("INFO", `⛽ Estimated gas for approval: ${gas.toString()}`);
 
   return {...res.data, gas: Number(gas)};
 }
 
 /**
- * Builds the swap transaction via 1inch
+ * Builds a swap transaction using the 1inch API.
+ * @param {number} chainId - Blockchain chain ID.
+ * @param {string} apiKey - 1inch API key.
+ * @param {Record<string, any>} swapParams - Swap parameters.
+ * @returns {Promise<TxObject>} Swap transaction object.
  */
 async function buildSwapTx(
   chainId: number,
@@ -93,20 +126,23 @@ async function buildSwapTx(
   swapParams: Record<string, any>
 ): Promise<TxObject> {
   const url = buildApiRequestUrl(chainId, "/swap", swapParams);
-  console.log(`🔁 Building swap TX: ${url}`);
+  log("INFO", `🔁 Building swap TX: ${url}`);
   const res = await axios.get(url, {headers: buildHeaders(apiKey)});
-  console.log(`📦 Swap TX payload received.`);
+  log("INFO", `📦 Swap TX payload received.`);
   return res.data.tx;
 }
 
 /**
- * Signs and sends transaction to the network
+ * Signs and sends a transaction to the blockchain network.
+ * @param {ethers.Wallet} wallet - Ethers Wallet instance.
+ * @param {TxObject} tx - Transaction object.
+ * @returns {Promise<string>} Transaction hash.
  */
 async function signAndSendTransaction(
   wallet: ethers.Wallet,
   tx: TxObject
 ): Promise<string> {
-  console.log(`🚀 Sending transaction to: ${tx.to}`);
+  log("INFO", `🚀 Sending transaction to: ${tx.to}`);
   const txResponse = await wallet.sendTransaction({
     to: tx.to,
     data: tx.data,
@@ -115,23 +151,23 @@ async function signAndSendTransaction(
     gasPrice: tx.gasPrice ? ethers.toBigInt(tx.gasPrice) : undefined,
   });
 
-  console.log(`📡 Waiting for transaction confirmation...`);
-  await txResponse.wait(); // wait for 1 confirmation
-  console.log(`✅ Transaction confirmed: ${txResponse.hash}`);
+  log("INFO", `📡 Waiting for transaction confirmation...`);
+  await txResponse.wait();
+  log("INFO", `✅ Transaction confirmed: ${txResponse.hash}`);
   return txResponse.hash;
 }
 
 /**
- * Performs a token swap using 1inch API
- * @param fromToken - Token contract address you're selling
- * @param toToken - Token contract address you're buying
- * @param amountWei - Amount in base units (wei)
- * @param provider - Ethers provider instance
- * @param wallet - Ethers wallet instance
- * @param walletAddress - Your wallet address
- * @param apiKey - 1inch API key
- * @param chainId - Chain ID (e.g. 1 for Ethereum)
- * @returns The swap transaction hash
+ * Performs a token swap using 1inch API.
+ * @param {string} fromToken - Token contract address you're selling.
+ * @param {string} toToken - Token contract address you're buying.
+ * @param {string} amountWei - Amount to sell (in wei).
+ * @param {JsonRpcProvider} provider - Ethers provider instance.
+ * @param {ethers.Wallet} wallet - Ethers wallet instance.
+ * @param {string} walletAddress - Wallet address.
+ * @param {string} apiKey - 1inch API key.
+ * @param {number} chainId - Blockchain chain ID.
+ * @returns {Promise<string>} The transaction hash.
  */
 export async function performTokenSwap(
   fromToken: string,
@@ -143,7 +179,8 @@ export async function performTokenSwap(
   apiKey: string,
   chainId: number
 ): Promise<string> {
-  console.log(
+  log(
+    "INFO",
     `💰 Starting token swap: ${fromToken} → ${toToken} | Amount (wei): ${amountWei}`
   );
 
@@ -166,7 +203,7 @@ export async function performTokenSwap(
   );
 
   if (BigInt(allowance) < BigInt(amountWei)) {
-    console.log(`⚠️ Insufficient allowance. Approval required.`);
+    log("WARN", `⚠️ Insufficient allowance. Approval required.`);
     const approvalTx = await buildApprovalTx(
       provider,
       chainId,
@@ -176,14 +213,14 @@ export async function performTokenSwap(
       amountWei
     );
     const approvalHash = await signAndSendTransaction(wallet, approvalTx);
-    console.log(`✅ Approval TX hash: ${approvalHash}`);
+    log("INFO", `✅ Approval TX hash: ${approvalHash}`);
   } else {
-    console.log(`👍 Sufficient allowance. No approval needed.`);
+    log("INFO", `👍 Sufficient allowance. No approval needed.`);
   }
 
   const swapTx = await buildSwapTx(chainId, apiKey, swapParams);
   const swapHash = await signAndSendTransaction(wallet, swapTx);
-  console.log(`✅ Swap TX hash: ${swapHash}`);
+  log("INFO", `✅ Swap TX hash: ${swapHash}`);
 
   return swapHash;
 }

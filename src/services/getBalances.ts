@@ -1,21 +1,25 @@
 import {ethers} from "ethers";
 import type {JsonRpcProvider} from "ethers";
 import {TOKEN_ADDRESS_MAP} from "../utils/tokens";
+import {log} from "../utils/logger";
 
 /**
- * Fetches the current ETH and ERC-20 token balances for the configured wallet.
+ * Fetches the current ETH and ERC-20 token balances for a given wallet.
  *
  * @async
  * @function getBalances
+ * @param {JsonRpcProvider} provider - The ethers.js provider instance.
+ * @param {string} walletAddress - The wallet address to query balances for.
+ * @param {number} chainId - The blockchain network's chain ID.
  * @returns {Promise<{
  *   wallet: string,
  *   chainId: number,
  *   balances: Record<string, string>
- * }>} An object containing the wallet address, chain ID, and a map of token symbols to their balances.
+ * }>} An object containing the wallet address, chain ID, and token balances.
  *
  * @example
- * const data = await getBalances();
- * console.log(data.balances.USDT); // e.g., "200.00"
+ * const data = await getBalances(provider, wallet, 1);
+ * console.log(data.balances.USDT); // "1782.92"
  */
 export const getBalances = async (
   provider: JsonRpcProvider,
@@ -29,14 +33,20 @@ export const getBalances = async (
   const balances: Record<string, string> = {};
   const nativeSymbol = "ETH";
 
-  console.log(`📡 Fetching balances for wallet: ${walletAddress}`);
+  log("INFO", `📡 Fetching balances for wallet: ${walletAddress}`);
 
-  // Native ETH
-  const nativeBalance = await provider.getBalance(walletAddress);
-  balances[nativeSymbol] = ethers.formatEther(nativeBalance);
-  console.log(`💰 ${nativeSymbol}: ${balances[nativeSymbol]}`);
+  try {
+    const nativeBalance = await provider.getBalance(walletAddress);
+    balances[nativeSymbol] = ethers.formatEther(nativeBalance);
+    log("INFO", `💰 ${nativeSymbol}: ${balances[nativeSymbol]}`);
+  } catch (err) {
+    log(
+      "WARN",
+      `⚠️ Failed to fetch native ETH balance: ${(err as Error).message}`
+    );
+    balances[nativeSymbol] = "Error";
+  }
 
-  // ERC-20 balances
   const erc20Abi = [
     "function balanceOf(address account) view returns (uint256)",
     "function decimals() view returns (uint8)",
@@ -54,10 +64,10 @@ export const getBalances = async (
 
       const formatted = ethers.formatUnits(rawBalance, decimals);
       balances[symbol] = formatted;
-      console.log(`💰 ${symbol}: ${formatted}`);
+      log("INFO", `💰 ${symbol}: ${formatted}`);
     } catch (err) {
       const errorMsg = (err as Error).message;
-      console.warn(`⚠️ Failed to fetch balance for ${symbol}: ${errorMsg}`);
+      log("WARN", `⚠️ Failed to fetch balance for ${symbol}: ${errorMsg}`);
       balances[symbol] = "Error";
     }
   }

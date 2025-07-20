@@ -1,6 +1,7 @@
 import express from "express";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
+import {log} from "./utils/logger";
 
 dotenv.config();
 import metamaskRoute from "./routes/wallets/metamask";
@@ -17,5 +18,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  log("INFO", `🚀 Server running on http://localhost:${PORT}`);
 });

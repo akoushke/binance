@@ -1,4 +1,3 @@
-import axios from "axios";
 import {Request, Response, Router} from "express";
 import {
   CHAIN_ID,
@@ -10,10 +9,12 @@ import {
 import {TOKEN_ADDRESS_MAP} from "../../utils/tokens";
 import {toWei} from "../../utils/toWei";
 import {sendTelegramNotification} from "../../notifications/telegram";
-import {getBalances} from "../../services/getBalance";
+import {getBalances} from "../../services/getBalances";
 import {performTokenSwap} from "../../services/performTokenSwap";
+import {log} from "../../utils/logger";
 
 const router = Router();
+
 /**
  * GET /balances
  * Returns balances of all supported tokens for the configured wallet
@@ -21,9 +22,10 @@ const router = Router();
 router.get("/balances", async (_req: Request, res: Response) => {
   try {
     const result = await getBalances(provider, WALLET_ADDRESS, CHAIN_ID);
+    log("INFO", `✅ Retrieved balances for wallet ${WALLET_ADDRESS}`);
     return res.status(200).json({success: true, ...result});
   } catch (error: any) {
-    console.error("❌ Error retrieving balances:", error?.message || error);
+    log("ERROR", `❌ Error retrieving balances: ${error?.message || error}`);
     return res.status(500).json({
       success: false,
       message: "Failed to retrieve wallet balances.",
@@ -39,7 +41,7 @@ router.get("/balances", async (_req: Request, res: Response) => {
 router.post("/webhook", async (req: Request, res: Response) => {
   const {from, to, amount} = req.body;
 
-  console.log("📨 Swap request received:", {from, to, amount});
+  log("INFO", "📨 Swap request received", {from, to, amount});
 
   if (!from || !to || !amount) {
     return res.status(400).json({
@@ -55,7 +57,8 @@ router.post("/webhook", async (req: Request, res: Response) => {
   const toToken = TOKEN_ADDRESS_MAP[toSymbol];
 
   if (!fromToken || !toToken) {
-    console.warn(
+    log(
+      "WARN",
       `❌ Unsupported token(s): from='${fromSymbol}', to='${toSymbol}'`
     );
     return res.status(400).json({
@@ -66,7 +69,8 @@ router.post("/webhook", async (req: Request, res: Response) => {
 
   try {
     const amountWei = await toWei(String(amount), fromToken, provider);
-    console.log(`🔢 Converted ${amount} ${fromSymbol} → ${amountWei} wei`);
+    log("INFO", `🔢 Converted ${amount} ${fromSymbol} → ${amountWei} wei`);
+
     const txHash = await performTokenSwap(
       fromToken,
       toToken,
@@ -77,6 +81,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
       API_KEY,
       CHAIN_ID
     );
+
     const {balances} = await getBalances(provider, WALLET_ADDRESS, CHAIN_ID);
     const balanceLines = Object.entries(balances)
       .map(([symbol, value]) => `• *${symbol}*: ${value}`)
@@ -95,13 +100,16 @@ router.post("/webhook", async (req: Request, res: Response) => {
       ],
     });
 
+    log("INFO", `✅ Swap completed successfully: ${txHash}`);
+
     return res.status(200).json({
       success: true,
       message: `Swap from ${fromSymbol} to ${toSymbol} submitted successfully.`,
       txHash,
     });
   } catch (error: any) {
-    console.error("❌ Swap error:", error?.message || error);
+    log("ERROR", `❌ Swap error: ${error?.message || error}`);
+
     await sendTelegramNotification(
       `*Swap Failed:* ${amount} ${fromSymbol} → ${toSymbol}\n*Reason:* ${
         error?.message || "Unknown error"
