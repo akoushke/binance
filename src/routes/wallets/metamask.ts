@@ -1,66 +1,27 @@
+import axios from "axios";
 import {Request, Response, Router} from "express";
-import {ethers} from "ethers";
-import {performTokenSwap} from "../../services/performTokenSwap";
 import {
+  CHAIN_ID,
   provider,
-  wallet,
   WALLET_ADDRESS,
   API_KEY,
-  CHAIN_ID,
+  wallet,
 } from "../../configs/wallets/metamask";
 import {TOKEN_ADDRESS_MAP} from "../../utils/tokens";
 import {toWei} from "../../utils/toWei";
+import {sendTelegramNotification} from "../../notifications/telegram";
+import {getBalances} from "../../services/getBalance";
+import {performTokenSwap} from "../../services/performTokenSwap";
 
 const router = Router();
-
 /**
  * GET /balances
  * Returns balances of all supported tokens for the configured wallet
  */
 router.get("/balances", async (_req: Request, res: Response) => {
-  const balances: Record<string, string> = {};
-  const nativeSymbol = "ETH";
-
   try {
-    console.log(`📡 Fetching balances for wallet: ${WALLET_ADDRESS}`);
-
-    // Native ETH
-    const nativeBalance = await provider.getBalance(WALLET_ADDRESS);
-    balances[nativeSymbol] = ethers.formatEther(nativeBalance);
-    console.log(`💰 ${nativeSymbol}: ${balances[nativeSymbol]}`);
-
-    // ERC-20 balances
-    const erc20Abi = [
-      "function balanceOf(address account) view returns (uint256)",
-      "function decimals() view returns (uint8)",
-    ];
-
-    for (const [symbol, address] of Object.entries(TOKEN_ADDRESS_MAP)) {
-      if (symbol === nativeSymbol) continue;
-
-      try {
-        const token = new ethers.Contract(address, erc20Abi, provider);
-        const [rawBalance, decimals] = await Promise.all([
-          token.balanceOf(WALLET_ADDRESS),
-          token.decimals(),
-        ]);
-
-        const formatted = ethers.formatUnits(rawBalance, decimals);
-        balances[symbol] = formatted;
-        console.log(`💰 ${symbol}: ${formatted}`);
-      } catch (err) {
-        const errorMsg = (err as Error).message;
-        console.warn(`⚠️ Failed to fetch balance for ${symbol}: ${errorMsg}`);
-        balances[symbol] = "Error";
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      wallet: WALLET_ADDRESS,
-      chainId: CHAIN_ID,
-      balances,
-    });
+    const result = await getBalances(provider, WALLET_ADDRESS, CHAIN_ID);
+    return res.status(200).json({success: true, ...result});
   } catch (error: any) {
     console.error("❌ Error retrieving balances:", error?.message || error);
     return res.status(500).json({
@@ -106,7 +67,6 @@ router.post("/webhook", async (req: Request, res: Response) => {
   try {
     const amountWei = await toWei(String(amount), fromToken, provider);
     console.log(`🔢 Converted ${amount} ${fromSymbol} → ${amountWei} wei`);
-
     const txHash = await performTokenSwap(
       fromToken,
       toToken,
@@ -117,6 +77,23 @@ router.post("/webhook", async (req: Request, res: Response) => {
       API_KEY,
       CHAIN_ID
     );
+    const {balances} = await getBalances(provider, WALLET_ADDRESS, CHAIN_ID);
+    const balanceLines = Object.entries(balances)
+      .map(([symbol, value]) => `• *${symbol}*: ${value}`)
+      .join("\n");
+
+    const message = `*Token Swap Alert:* ${amount} ${fromSymbol} → ${toSymbol}\n\n*Balances:*\n${balanceLines}`;
+
+    await sendTelegramNotification(message, {
+      inline_keyboard: [
+        [
+          {
+            text: "View Transaction",
+            url: `https://etherscan.io/tx/${txHash}`,
+          },
+        ],
+      ],
+    });
 
     return res.status(200).json({
       success: true,
@@ -125,6 +102,12 @@ router.post("/webhook", async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error("❌ Swap error:", error?.message || error);
+    await sendTelegramNotification(
+      `*Swap Failed:* ${amount} ${fromSymbol} → ${toSymbol}\n*Reason:* ${
+        error?.message || "Unknown error"
+      }`
+    );
+
     return res.status(500).json({
       success: false,
       message: "Failed to perform token swap.",
