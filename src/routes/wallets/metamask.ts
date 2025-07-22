@@ -12,6 +12,7 @@ import {sendTelegramNotification} from "../../notifications/telegram";
 import {getBalances} from "../../services/getBalances";
 import {performTokenSwap} from "../../services/performTokenSwap";
 import {log} from "../../utils/logger";
+import {calculateSwapAmount} from "../../services/calculateSwapAmount";
 
 const router = Router();
 
@@ -39,11 +40,12 @@ router.get("/balances", async (_req: Request, res: Response) => {
  * Trigger a token swap via 1inch Aggregation Protocol
  */
 router.post("/webhook", async (req: Request, res: Response) => {
-  const {from, to, amount} = req.body;
+  let {from, to, riskPct = 0.02} = req.body;
+  riskPct = parseFloat(riskPct);
 
-  log("INFO", "📨 Swap request received", {from, to, amount});
+  log("INFO", "📨 Swap request received", {from, to, riskPct});
 
-  if (!from || !to || !amount) {
+  if (!from || !to) {
     return res.status(400).json({
       success: false,
       message: "Missing 'from', 'to', or 'amount' in the request body.",
@@ -68,6 +70,15 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 
   try {
+    const {balances} = await getBalances(provider, WALLET_ADDRESS, CHAIN_ID);
+
+    const amount = await calculateSwapAmount({
+      ethBalance: parseFloat(balances.ETH),
+      usdtBalance: parseFloat(balances.USDT),
+      tradeDirection: fromSymbol === "USDT" ? "USDT_TO_ETH" : "ETH_TO_USDT",
+      riskPct,
+    });
+
     const amountWei = await toWei(String(amount), fromToken, provider);
     log("INFO", `🔢 Converted ${amount} ${fromSymbol} → ${amountWei} wei`);
 
@@ -82,7 +93,6 @@ router.post("/webhook", async (req: Request, res: Response) => {
       CHAIN_ID
     );
 
-    const {balances} = await getBalances(provider, WALLET_ADDRESS, CHAIN_ID);
     const balanceLines = Object.entries(balances)
       .map(([symbol, value]) => `• *${symbol}*: ${value}`)
       .join("\n");
@@ -111,7 +121,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
     log("ERROR", `❌ Swap error: ${error?.message || error}`);
 
     await sendTelegramNotification(
-      `*Swap Failed:* ${amount} ${fromSymbol} → ${toSymbol}\n*Reason:* ${
+      `*Swap Failed:* ${riskPct} ${fromSymbol} → ${toSymbol}\n*Reason:* ${
         error?.message || "Unknown error"
       }`
     );
